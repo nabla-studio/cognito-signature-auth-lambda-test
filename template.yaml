@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Custom AWS Cognito authentication using signature-based verification via Lambda functions. Implements public key cryptography for secure user authentication flows.
+
+Transform:
+  - "AWS::Serverless-2016-10-31"
+
+Globals:
+
+  # Default settings for Lambda functions
+  Function:
+    Timeout: 10
+    Runtime: provided.al2023
+    Architectures:
+      - x86_64
+
+Resources:  
+  ##
+  ## Lambda triggers for custom auth flow
+  ## See: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-challenge.html
+  ##
+
+  DefineAuthChallengeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-DefineAuthChallenge"
+      CodeUri: ./lambdas/define-auth-challenge/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      MemorySize: 256
+      Description: Lambda function - Cognito Trigger to define Auth Challenge
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref CognitoUserPool
+            Trigger: DefineAuthChallenge
+
+  CreateAuthChallengeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-CreateAuthChallenge"
+      CodeUri: ./lambdas/create-auth-challenge/
+      Handler: create-auth-challenge
+      Runtime: provided.al2023
+      MemorySize: 256
+      Description: Lambda function - Cognito Trigger to creates Auth Challenge
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref CognitoUserPool
+            Trigger: CreateAuthChallenge
+
+  VerifyAuthChallengeResponseFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-VerifyAuthChallengeResponse"
+      CodeUri: ./lambdas/verify-auth-challenge-response/
+      Handler: verify-auth-challenge-response
+      Runtime: provided.al2023
+      MemorySize: 256
+      Description: Lambda function - Cognito Trigger to verify Auth Challenge response
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref CognitoUserPool
+            Trigger: VerifyAuthChallengeResponse
+
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-PreSignupChallenge"
+      CodeUri: ./lambdas/pre-sign-up/
+      Handler: pre-sign-up
+      Runtime: provided.al2023
+      MemorySize: 256
+      Description: Lambda function - Cognito Trigger before signup
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref CognitoUserPool
+            Trigger: PreSignUp
+
+  ##
+  ## Cognito
+  ##
+
+  # Cognito UserPool
+  # Used to store our users identity and wallet addresses
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 30
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+      UserPoolName: !Sub "${AWS::StackName}-UserPool"
+      Schema:
+      - Name: username
+        AttributeDataType: String
+        Mutable: true
+        Required: false
+      - Name: pubKSecp256k1
+        AttributeDataType: String
+        Mutable: true
+        Required: false
+
+  CognitoUserPoolWebClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${AWS::StackName}-UserPoolWebClient"
+      GenerateSecret: false
+      UserPoolId: !Ref CognitoUserPool
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_CUSTOM_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+# Stack output
+Outputs:
+  CognitoUserPoolId:
+    Description: "ID of the Cognito User Pool"
+    Value: !Ref CognitoUserPool
+  CognitoUserPoolWebClientId:
+    Description: "Client ID associated to the Cognito UserPool Web Client"
+    Value: !Ref CognitoUserPoolWebClient
+  CognitoUserPoolArn:
+    Description: "ARN of the Cognito User Pool"
+    Value: !GetAtt CognitoUserPool.Arn
